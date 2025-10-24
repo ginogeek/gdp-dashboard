@@ -2,15 +2,15 @@ import streamlit as st
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+import pandas as pd
 import io
-import csv
 
 KISHOU_XML_PAGE_URL = "https://www.data.jma.go.jp/developer/xml/feed/extra_l.xml"
 
 st.set_page_config(page_title="気象庁 防災情報 (XML) ビューア", layout="wide")
 
 @st.cache_data(ttl=600)
-def fetch_feed(url: str, hours_threshold: int = 5):
+def fetch_feed(url: str, hours_threshold: int = 48):
     fetched = {"main_feed_xml": None, "linked_entries_xml": []}
     time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours_threshold)
 
@@ -23,13 +23,15 @@ def fetch_feed(url: str, hours_threshold: int = 5):
         atom_ns = "{http://www.w3.org/2005/Atom}"
 
         for entry in root.findall(f"{atom_ns}entry"):
-            entry_info = {}
-            entry_info["EntryID"] = entry.find(f"{atom_ns}id").text if entry.find(f"{atom_ns}id") is not None else "N/A"
-            entry_info["FeedReportDateTime"] = entry.find(f"{atom_ns}updated").text if entry.find(f"{atom_ns}updated") is not None else "N/A"
-            entry_info["FeedTitle"] = entry.find(f"{atom_ns}title").text if entry.find(f"{atom_ns}title") is not None else "N/A"
-            entry_info["Author"] = entry.find(f"{atom_ns}author/{atom_ns}name").text if entry.find(f"{atom_ns}author/{atom_ns}name") is not None else "N/A"
+            entry_info = {
+                "EntryID": entry.find(f"{atom_ns}id").text if entry.find(f"{atom_ns}id") is not None else "N/A",
+                "FeedReportDateTime": entry.find(f"{atom_ns}updated").text if entry.find(f"{atom_ns}updated") is not None else "N/A",
+                "FeedTitle": entry.find(f"{atom_ns}title").text if entry.find(f"{atom_ns}title") is not None else "N/A",
+                "Author": entry.find(f"{atom_ns}author/{atom_ns}name").text if entry.find(f"{atom_ns}author/{atom_ns}name") is not None else "N/A",
+                "LinkedXMLData": None,
+                "LinkedXMLUrl": None
+            }
 
-            # 時刻フィルタ
             feed_report_time_str = entry_info.get("FeedReportDateTime")
             skip_by_time = False
             if feed_report_time_str and feed_report_time_str != "N/A":
@@ -55,10 +57,6 @@ def fetch_feed(url: str, hours_threshold: int = 5):
                     except Exception as e:
                         entry_info["LinkedXMLData"] = None
                         entry_info["LinkedXMLError"] = str(e)
-                else:
-                    entry_info["LinkedXMLData"] = None
-            else:
-                entry_info["LinkedXMLData"] = None
             fetched["linked_entries_xml"].append(entry_info)
 
     except Exception as e:
@@ -163,74 +161,50 @@ if data.get("error"):
     st.error(f"取得中にエラーが発生しました: {data['error']}")
 
 entries = data.get("linked_entries_xml", [])
-st.markdown(f"**取得エントリー数**: {len(entries)}")
+st.markdown(f"**フィード内エントリー数**: {len(entries)}")
 
+# Atom フィードの CSV ダウンロード機能
 if entries:
-    titles = [f"{i+1}: {e.get('FeedTitle','N/A')} ({e.get('FeedReportDateTime','')})" for i, e in enumerate(entries)]
-    idx = st.selectbox("エントリーを選択", options=list(range(len(entries))), format_func=lambda i: titles[i])
-    sel = entries[idx]
-
-    st.subheader("メタ情報")
-    st.write({
-        "EntryID": sel.get("EntryID"),
-        "FeedTitle": sel.get("FeedTitle"),
-        "FeedReportDateTime": sel.get("FeedReportDateTime"),
-        "Author": sel.get("Author"),
-        "LinkedXMLUrl": sel.get("LinkedXMLUrl", "N/A"),
-    })
-
-st.markdown("---")
-st.header("気象特別警報・警報・注意報 の抽出結果")
-parsed = parse_warnings_advisories(data, hours_threshold=hours)
-st.markdown(f"**抽出件数**: {len(parsed)}")
-
-if parsed:
-    rows = []
-    for p in parsed:
-        for wa in p.get("WarningsAdvisories", []):
-            rows.append({
-                "EntryID": p.get("EntryID"),
-                "FeedReportDateTime": p.get("FeedReportDateTime"),
-                "ReportDateTime": p.get("ReportDateTime", ""),
-                "FeedTitle": p.get("FeedTitle", ""),
-                "Author": p.get("Author", ""),
-                "LinkedXMLUrl": p.get("LinkedXMLUrl", ""),
-                "Kind": wa.get("Kind"),
-                "Area": wa.get("Area"),
-                "Detail": wa.get("Detail"),
-            })
-    st.table(rows)
-
-    csv_buffer = io.StringIO()
-    writer = csv.writer(csv_buffer)
-    header = ["EntryID", "FeedReportDateTime", "ReportDateTime", "FeedTitle", "Author", "LinkedXMLUrl", "Kind", "Area", "Detail"]
-    writer.writerow(header)
-    for r in rows:
-        writer.writerow([r.get(h, "") for h in header])
-
-    csv_bytes = csv_buffer.getvalue().encode("utf-8-sig")
-    csv_buffer.close()
-
-    file_name = f"warnings_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
+    atom_feed_df = pd.DataFrame(entries)
+    csv_buffer_atom = io.StringIO()
+    atom_feed_df.to_csv(csv_buffer_atom, index=False, encoding="utf-8-sig")
     st.download_button(
-        label="CSV をダウンロード",
-        data=csv_bytes,
-        file_name=file_name,
+        label="Atom フィードを CSV でダウンロード",
+        data=csv_buffer_atom.getvalue().encode("utf-8-sig"),  # BOM付きUTF-8
+
+        file_name=f"atom_feed_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv",
         mime="text/csv"
     )
 
-    sel_idx = st.selectbox("抽出エントリー（詳細）を選択", options=list(range(len(parsed))), format_func=lambda i: f"{i+1}: {parsed[i]['EntryID']} / {parsed[i]['FeedReportDateTime']}")
-    sel_parsed = parsed[sel_idx]
-    st.subheader("選択エントリーの詳細")
-    st.json({
-        "EntryID": sel_parsed.get("EntryID"),
-        "FeedTitle": sel_parsed.get("FeedTitle"),
-        "FeedReportDateTime": sel_parsed.get("FeedReportDateTime"),
-        "ReportDateTime": sel_parsed.get("ReportDateTime"),
-        "Author": sel_parsed.get("Author"),
-        "LinkedXMLDataPresent": sel_parsed.get("LinkedXMLDataPresent"),
-        "LinkedXMLUrl": sel_parsed.get("LinkedXMLUrl"),
-        "WarningsAdvisories": sel_parsed.get("WarningsAdvisories"),
-    })
+parsed = parse_warnings_advisories(data, hours_threshold=hours)
+if parsed:
+    transformed_data_for_db = []
+    count_placeholder = st.empty()  # カウントアップ用のプレースホルダー
+    count = 0
+    for p in parsed:
+        for wa in p.get("WarningsAdvisories", []):
+            transformed_data_for_db.append({
+                "ReportDateTime": p.get("ReportDateTime"),
+                "Title": p.get("FeedTitle"),
+                "Author": p.get("Author"),
+                "Kind": wa.get("Kind"),
+                "Area": wa.get("Area"),
+                "Detail": wa.get("Detail"),
+                "EntryID": p.get("EntryID")
+            })
+            count += 1
+            count_placeholder.info(f"{count} 件のデータを読み込み中...")  # 同じ枠内で更新
+
+    csv_buffer_warnings = io.StringIO()
+    df = pd.DataFrame(transformed_data_for_db)
+    df.to_csv(csv_buffer_warnings, index=False, encoding="utf-8-sig")
+    count_placeholder.success(f"{count} 件のデータの読み込みが完了しました！")  # 完了メッセージ
+    st.download_button(
+        label="警報・注意報データを CSV でダウンロード",
+        data=csv_buffer_warnings.getvalue().encode("utf-8-sig"),  # BOM付きUTF-8
+
+        file_name=f"warnings_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv",
+        mime="text/csv"
+    )
 else:
     st.info("抽出された '気象特別警報・警報・注意報' はありません。")
