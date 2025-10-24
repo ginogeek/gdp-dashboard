@@ -10,7 +10,7 @@ KISHOU_XML_PAGE_URL = "https://www.data.jma.go.jp/developer/xml/feed/extra_l.xml
 st.set_page_config(page_title="気象庁 防災情報 (XML) ビューア", layout="wide")
 
 @st.cache_data(ttl=600)
-def fetch_feed(url: str, hours_threshold: int = 48):
+def fetch_feed(url: str, hours_threshold: int = 5):
     fetched = {"main_feed_xml": None, "linked_entries_xml": []}
     time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours_threshold)
 
