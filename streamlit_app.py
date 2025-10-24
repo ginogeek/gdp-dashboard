@@ -9,6 +9,25 @@ KISHOU_XML_PAGE_URL = "https://www.data.jma.go.jp/developer/xml/feed/extra_l.xml
 
 st.set_page_config(page_title="気象庁 防災情報 (XML) ビューア", layout="wide")
 
+# --- 追加部分: 気象庁防災情報XMLの説明 ---
+with st.expander("📘 気象庁防災情報XMLとは？", expanded=True):
+    st.markdown("""
+    気象庁は、**気象・津波・地震・火山などの防災情報**を迅速かつ正確に伝えるために  
+    「気象庁防災情報XMLフォーマット」を策定し、2005年から運用しています。
+
+    - **目的**: 自然災害の軽減、国民生活の向上、交通安全の確保、産業の発展を支援  
+    - **特徴**:  
+        - XML形式で機械可読な防災情報を提供  
+        - ニュースや自治体システムなどでの自動処理・配信が可能  
+        - 「Pull型」で誰でも自由に取得可能（ユーザー登録不要）  
+    - **利用例**:  
+        - 防災アプリや自治体システムでの自動通知  
+        - 報道機関による速報配信  
+        - 研究・教育分野でのデータ活用  
+
+    詳細は [気象庁公式サイト](https://xml.kishou.go.jp/) をご参照ください。
+    """)
+
 @st.cache_data(ttl=600)
 def fetch_feed(url: str, hours_threshold: int = 48):
     fetched = {"main_feed_xml": None, "linked_entries_xml": []}
@@ -170,41 +189,4 @@ if entries:
     atom_feed_df.to_csv(csv_buffer_atom, index=False, encoding="utf-8-sig")
     st.download_button(
         label="Atom フィードを CSV でダウンロード",
-        data=csv_buffer_atom.getvalue().encode("utf-8-sig"),  # BOM付きUTF-8
-
-        file_name=f"atom_feed_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv",
-        mime="text/csv"
-    )
-
-parsed = parse_warnings_advisories(data, hours_threshold=hours)
-if parsed:
-    transformed_data_for_db = []
-    count_placeholder = st.empty()  # カウントアップ用のプレースホルダー
-    count = 0
-    for p in parsed:
-        for wa in p.get("WarningsAdvisories", []):
-            transformed_data_for_db.append({
-                "ReportDateTime": p.get("ReportDateTime"),
-                "Title": p.get("FeedTitle"),
-                "Author": p.get("Author"),
-                "Kind": wa.get("Kind"),
-                "Area": wa.get("Area"),
-                "Detail": wa.get("Detail"),
-                "EntryID": p.get("EntryID")
-            })
-            count += 1
-            count_placeholder.info(f"{count} 件のデータを読み込み中...")  # 同じ枠内で更新
-
-    csv_buffer_warnings = io.StringIO()
-    df = pd.DataFrame(transformed_data_for_db)
-    df.to_csv(csv_buffer_warnings, index=False, encoding="utf-8-sig")
-    count_placeholder.success(f"{count} 件のデータの読み込みが完了しました！")  # 完了メッセージ
-    st.download_button(
-        label="警報・注意報データを CSV でダウンロード",
-        data=csv_buffer_warnings.getvalue().encode("utf-8-sig"),  # BOM付きUTF-8
-
-        file_name=f"warnings_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv",
-        mime="text/csv"
-    )
-else:
-    st.info("抽出された '気象特別警報・警報・注意報' はありません。")
+        data=csv_buffer_atom.getvalue().encode("utf
