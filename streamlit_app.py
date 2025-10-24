@@ -153,3 +153,8 @@ def parse_warnings_advisories(fetched_data, hours_threshold: int = 48):
             except Exception:
                 warnings.append({"Kind": "エラー", "Area": "エラー", "Detail": "不明なエラー"})
         else:
+            warnings.append({"Kind": "取得失敗", "Area": "取得失敗", "Detail": "リンクXMLがありません"})
+
+        if warnings and extracted["LinkedXMLDataPresent"]:
+            extracted["ReportDateTime"] = report_dt
+            extracted["WarningsAdvisories
